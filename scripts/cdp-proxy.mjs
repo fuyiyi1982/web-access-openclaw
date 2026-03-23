@@ -165,11 +165,13 @@ async function launchChrome() {
   const args = [
     `--remote-debugging-port=${CHROME_DEBUG_PORT}`,
     `--user-data-dir=${CHROME_USER_DATA_DIR}`,
+    '--headless=new',
     '--no-first-run',
     '--no-default-browser-check',
     '--disable-background-timer-throttling',
     '--disable-backgrounding-occluded-windows',
     '--disable-renderer-backgrounding',
+    '--disable-gpu',
     'about:blank',
   ];
 
