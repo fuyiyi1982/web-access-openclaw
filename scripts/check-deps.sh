@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # 环境检查 + 确保 CDP Proxy 就绪
 
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+
 # Node.js
 if command -v node &>/dev/null; then
   NODE_VER=$(node --version 2>/dev/null)
@@ -35,7 +37,7 @@ if echo "$HEALTH" | grep -q '"connected":true'; then
 else
   if ! echo "$HEALTH" | grep -q '"ok"'; then
     echo "proxy: starting..."
-    node ~/.claude/skills/web-access/scripts/cdp-proxy.mjs > /tmp/cdp-proxy.log 2>&1 &
+    node "$SCRIPT_DIR/cdp-proxy.mjs" > /tmp/cdp-proxy.log 2>&1 &
   fi
   for i in $(seq 1 15); do
     sleep 1
