@@ -25,10 +25,11 @@ s.on('connect', () => { process.exit(0); });
 s.on('error', () => process.exit(1));
 setTimeout(() => process.exit(1), 2000);
 " 2>/dev/null; then
-  echo "chrome: not connected — 请打开 chrome://inspect/#remote-debugging 并勾选 Allow remote debugging"
-  exit 1
+  echo "chrome: not detected — Proxy 将自动启动独立 Chrome 实例（无用户登录态）"
+  echo "  如需使用登录态，请打开 chrome://inspect/#remote-debugging 并勾选 Allow remote debugging"
+else
+  echo "chrome: ok (port 9222, 使用用户 Chrome 登录态)"
 fi
-echo "chrome: ok (port 9222)"
 
 # CDP Proxy — 已运行则跳过，未运行则启动并等待连接
 HEALTH=$(curl -s --connect-timeout 2 "http://127.0.0.1:3456/health" 2>/dev/null)

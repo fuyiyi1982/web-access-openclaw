@@ -49,10 +49,17 @@ openclaw skills list
 
 ## 前置配置
 
-CDP 模式需要 **Node.js 22+** 和 Chrome 开启远程调试：
+- **Node.js 22+**：必需
+- **Chrome/Chromium/Brave/Edge**：系统中安装任一即可。CDP Proxy 会**自动启动独立 Chrome 实例**，无需手动配置。
+
+### 可选：使用用户登录态
+
+如果需要访问已登录的网站（如微信公众号后台、小红书创作者中心等），可以开启用户 Chrome 的远程调试：
 
 1. Chrome 地址栏打开 `chrome://inspect/#remote-debugging`
 2. 勾选 **Allow remote debugging for this browser instance**（可能需要重启浏览器）
+
+开启后 CDP Proxy 会优先连接用户的 Chrome，自动获得登录态。
 
 ---
 

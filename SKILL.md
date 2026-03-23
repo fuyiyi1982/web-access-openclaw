@@ -17,7 +17,8 @@ bash {baseDir}/scripts/check-deps.sh
 ```
 
 - **Node.js 22+**：必需（使用原生 WebSocket）。版本低于 22 可用但需安装 `ws` 模块。
-- **Chrome remote-debugging**：在 Chrome 地址栏打开 `chrome://inspect/#remote-debugging`，勾选 **"Allow remote debugging for this browser instance"** 即可，可能需要重启浏览器。
+- **Chrome**：系统中需安装 Chrome/Chromium/Brave/Edge 之一。CDP Proxy 会自动检测并启动独立 Chrome 实例，**无需手动配置**。
+- **需要用户登录态时**（可选）：在 Chrome 地址栏打开 `chrome://inspect/#remote-debugging`，勾选 **"Allow remote debugging for this browser instance"**，Proxy 会优先连接用户日常 Chrome 以使用登录态。
 
 检查通过后再启动 CDP Proxy 执行操作，未通过则引导用户完成设置。
 
@@ -70,7 +71,11 @@ bash {baseDir}/scripts/check-deps.sh
 
 ## 浏览器 CDP 模式
 
-通过 CDP Proxy 直连用户日常 Chrome，天然携带登录态，无需启动独立浏览器。
+通过 CDP Proxy 操控 Chrome 浏览器。Proxy 会自动检测并连接：
+
+1. **优先连接用户日常 Chrome**（如已开启远程调试）——天然携带登录态
+2. **未检测到时自动启动独立 Chrome 实例**——使用独立数据目录，零配置即可使用，但无用户登录态
+
 若无用户明确要求，不主动操作用户已有 tab，所有操作都在自己创建的后台 tab 中进行，保持对用户环境的最小侵入。不关闭用户 tab 的前提下，完成任务后关闭自己创建的 tab，保持环境整洁。
 
 ### 启动
@@ -79,7 +84,7 @@ bash {baseDir}/scripts/check-deps.sh
 bash {baseDir}/scripts/check-deps.sh
 ```
 
-脚本会依次检查 Node.js、Chrome 端口，并确保 Proxy 已连接（未运行则自动启动并等待）。Proxy 20 分钟无请求自动退出，下次重新运行脚本即可。
+脚本会依次检查 Node.js、Chrome 端口，并确保 Proxy 已连接（未运行则自动启动并等待）。若用户 Chrome 未开启调试，Proxy 将自动启动独立 Chrome。Proxy 20 分钟无请求自动退出，下次重新运行脚本即可。
 
 ### Proxy API
 

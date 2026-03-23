@@ -9,6 +9,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import net from 'node:net';
+import { execSync, spawn } from 'node:child_process';
 
 const PORT = parseInt(process.env.CDP_PROXY_PORT || '3456');
 let ws = null;
@@ -97,6 +98,127 @@ function checkPort(port) {
   });
 }
 
+// --- 自动查找 Chrome 可执行文件 ---
+function findChromeBinary() {
+  const platform = os.platform();
+
+  if (platform === 'darwin') {
+    const candidates = [
+      '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+      '/Applications/Google Chrome Canary.app/Contents/MacOS/Google Chrome Canary',
+      '/Applications/Chromium.app/Contents/MacOS/Chromium',
+      '/Applications/Brave Browser.app/Contents/MacOS/Brave Browser',
+      '/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge',
+    ];
+    for (const c of candidates) {
+      if (fs.existsSync(c)) return c;
+    }
+  } else if (platform === 'linux') {
+    const names = ['google-chrome', 'google-chrome-stable', 'chromium', 'chromium-browser', 'brave-browser', 'microsoft-edge'];
+    for (const name of names) {
+      try {
+        const p = execSync(`which ${name}`, { encoding: 'utf-8' }).trim();
+        if (p) return p;
+      } catch { /* not found */ }
+    }
+  } else if (platform === 'win32') {
+    const programFiles = process.env['ProgramFiles'] || 'C:\\Program Files';
+    const programFilesX86 = process.env['ProgramFiles(x86)'] || 'C:\\Program Files (x86)';
+    const localAppData = process.env.LOCALAPPDATA || '';
+    const candidates = [
+      path.join(programFiles, 'Google/Chrome/Application/chrome.exe'),
+      path.join(programFilesX86, 'Google/Chrome/Application/chrome.exe'),
+      path.join(localAppData, 'Google/Chrome/Application/chrome.exe'),
+      path.join(programFiles, 'BraveSoftware/Brave-Browser/Application/brave.exe'),
+      path.join(localAppData, 'BraveSoftware/Brave-Browser/Application/brave.exe'),
+      path.join(programFiles, 'Microsoft/Edge/Application/msedge.exe'),
+      path.join(programFilesX86, 'Microsoft/Edge/Application/msedge.exe'),
+    ];
+    for (const c of candidates) {
+      if (fs.existsSync(c)) return c;
+    }
+  }
+  return null;
+}
+
+// --- 自动启动 Chrome 实例 ---
+let launchedChromeProcess = null;
+const CHROME_DEBUG_PORT = 9222;
+const CHROME_USER_DATA_DIR = path.join(os.tmpdir(), 'cdp-proxy-chrome-profile');
+
+async function launchChrome() {
+  const binary = findChromeBinary();
+  if (!binary) {
+    throw new Error(
+      '未找到 Chrome/Chromium 浏览器。请安装 Chrome 或设置 CHROME_PATH 环境变量。'
+    );
+  }
+
+  // 确保 user-data-dir 存在
+  if (!fs.existsSync(CHROME_USER_DATA_DIR)) {
+    fs.mkdirSync(CHROME_USER_DATA_DIR, { recursive: true });
+  }
+
+  console.log(`[CDP Proxy] 自动启动 Chrome: ${binary}`);
+  console.log(`[CDP Proxy] 调试端口: ${CHROME_DEBUG_PORT}, 数据目录: ${CHROME_USER_DATA_DIR}`);
+
+  const args = [
+    `--remote-debugging-port=${CHROME_DEBUG_PORT}`,
+    `--user-data-dir=${CHROME_USER_DATA_DIR}`,
+    '--no-first-run',
+    '--no-default-browser-check',
+    '--disable-background-timer-throttling',
+    '--disable-backgrounding-occluded-windows',
+    '--disable-renderer-backgrounding',
+    'about:blank',
+  ];
+
+  // Windows 下如果有中文路径, spawn 需要 shell: true
+  launchedChromeProcess = spawn(binary, args, {
+    stdio: 'ignore',
+    detached: os.platform() !== 'win32',
+    ...(os.platform() === 'win32' ? { shell: true } : {}),
+  });
+
+  launchedChromeProcess.unref();
+
+  launchedChromeProcess.on('error', (e) => {
+    console.error('[CDP Proxy] Chrome 启动失败:', e.message);
+    launchedChromeProcess = null;
+  });
+
+  launchedChromeProcess.on('exit', (code) => {
+    console.log(`[CDP Proxy] Chrome 已退出 (code: ${code})`);
+    launchedChromeProcess = null;
+  });
+
+  // 等待 Chrome 启动并开放调试端口
+  for (let i = 0; i < 30; i++) {
+    await new Promise(r => setTimeout(r, 500));
+    const ok = await checkPort(CHROME_DEBUG_PORT);
+    if (ok) {
+      console.log(`[CDP Proxy] Chrome 已就绪 (端口 ${CHROME_DEBUG_PORT})`);
+      return CHROME_DEBUG_PORT;
+    }
+  }
+  throw new Error('Chrome 启动超时，调试端口未就绪');
+}
+
+// 清理自动启动的 Chrome
+function cleanupChrome() {
+  if (launchedChromeProcess) {
+    console.log('[CDP Proxy] 正在关闭自动启动的 Chrome...');
+    try {
+      if (os.platform() === 'win32') {
+        execSync(`taskkill /PID ${launchedChromeProcess.pid} /T /F`, { stdio: 'ignore' });
+      } else {
+        process.kill(-launchedChromeProcess.pid, 'SIGTERM');
+      }
+    } catch { /* 已退出 */ }
+    launchedChromeProcess = null;
+  }
+}
+
 function getWebSocketUrl(chromePort) {
   return `ws://127.0.0.1:${chromePort}/devtools/browser`;
 }
@@ -110,12 +232,9 @@ async function connect() {
   if (!chromePort) {
     chromePort = await discoverChromePort();
     if (!chromePort) {
-      throw new Error(
-        'Chrome 未开启远程调试端口。请用以下方式启动 Chrome：\n' +
-        '  macOS: /Applications/Google\\ Chrome.app/Contents/MacOS/Google\\ Chrome --remote-debugging-port=9222\n' +
-        '  Linux: google-chrome --remote-debugging-port=9222\n' +
-        '  或在 chrome://flags 中搜索 "remote debugging" 并启用'
-      );
+      // 未发现用户 Chrome 调试端口，自动启动独立 Chrome 实例
+      console.log('[CDP Proxy] 未发现用户 Chrome 调试端口，尝试自动启动 Chrome...');
+      chromePort = await launchChrome();
     }
   }
 
@@ -555,5 +674,10 @@ process.on('uncaughtException', (e) => {
 process.on('unhandledRejection', (e) => {
   console.error('[CDP Proxy] 未处理拒绝:', e?.message || e);
 });
+
+// 退出时清理自动启动的 Chrome
+process.on('exit', cleanupChrome);
+process.on('SIGINT', () => { cleanupChrome(); process.exit(0); });
+process.on('SIGTERM', () => { cleanupChrome(); process.exit(0); });
 
 main();
